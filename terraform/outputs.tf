@@ -17,3 +17,13 @@ output "nodes_instance_profile" {
   description = "Name of nodes instance profile"
   value       = module.iam.nodes_instance_profile_name
 }
+
+output "oidc_provider_arn" {
+  description = "ARN of the OIDC provider for IRSA"
+  value       = module.iam.oidc_provider_arn
+}
+
+output "oidc_provider_url" {
+  description = "URL of the OIDC provider for IRSA"
+  value       = module.iam.oidc_provider_url
+}

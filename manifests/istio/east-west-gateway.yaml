@@ -1,0 +1,190 @@
+# East-West Gateway Configuration for Multi-Cluster Istio
+# This implements the multi-primary, multi-network pattern
+
+---
+# East-West Gateway (deployed in both clusters)
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: istio-eastwestgateway
+  namespace: istio-system
+  labels:
+    aegis.multicluster: east-west
+spec:
+  selector:
+    istio: eastwestgateway
+  servers:
+  - port:
+      number: 15021
+      name: tls
+      protocol: TLS
+    tls:
+      mode: AUTO_PASSTHROUGH
+    hosts:
+    - "*.local"
+  - port:
+      number: 15443
+      name: tls-istiod
+      protocol: TLS
+    tls:
+      mode: AUTO_PASSTHROUGH
+    hosts:
+    - "*.local"
+  - port:
+      number: 15012
+      name: tls-istiodwebhook
+      protocol: TLS
+    tls:
+      mode: AUTO_PASSTHROUGH
+    hosts:
+    - "*.local"
+  - port:
+      number: 15017
+      name: tls-istiodwebhook
+      protocol: TLS
+    tls:
+      mode: AUTO_PASSTHROUGH
+    hosts:
+    - "*.local"
+
+---
+# Service Entry for cross-cluster service discovery
+apiVersion: networking.istio.io/v1alpha3
+kind: ServiceEntry
+metadata:
+  name: cross-cluster-services
+  namespace: istio-system
+  labels:
+    aegis.multicluster: service-discovery
+spec:
+  hosts:
+  - "*.cluster-a.local"
+  - "*.cluster-b.local"
+  ports:
+  - number: 443
+    name: https
+    protocol: HTTPS
+  - number: 80
+    name: http
+    protocol: HTTP
+  resolution: DNS
+  endpoints:
+  - address: eastwestgateway-cluster-a.aegis.local  # Remote cluster's east-west gateway
+    ports:
+      https: 15443
+      http: 80
+  - address: eastwestgateway-cluster-b.aegis.local  # Remote cluster's east-west gateway
+    ports:
+      https: 15443
+      http: 80
+  location: MESH_EXTERNAL
+  exportTo:
+  - "*"
+
+---
+# Peer Authentication for east-west traffic (STRICT)
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: east-west-mtls
+  namespace: istio-system
+  labels:
+    aegis.multicluster: east-west
+spec:
+  selector:
+    matchLabels:
+      istio: eastwestgateway
+  mtls:
+    mode: STRICT
+
+---
+# Authorization Policy for cross-cluster access
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: cross-cluster-access
+  namespace: default
+  labels:
+    aegis.multicluster: authorization
+spec:
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        principals:
+        - "spiffe://cluster.local/ns/default/sa/*"
+    to:
+    - operation:
+        methods: ["GET", "POST", "PUT", "DELETE"]
+        paths: ["/api/*", "/health"]
+
+---
+# Destination Rule for cross-cluster traffic policies
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: cross-cluster-traffic-policy
+  namespace: default
+  labels:
+    aegis.multicluster: traffic-policy
+spec:
+  host: "*.local"
+  trafficPolicy:
+    tls:
+      mode: SIMPLE  # Use SIMPLE for cross-cluster unless client certs are configured
+    loadBalancer:
+      simple: ROUND_ROBIN
+    connectionPool:
+      tcp:
+        maxConnections: 100
+        connectTimeout: 30s
+      http:
+        http1MaxPendingRequests: 10
+        http2MaxRequests: 100
+        maxRequestsPerConnection: 10
+        maxRetries: 3
+    outlierDetection:
+      consecutive5xxErrors: 3
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+
+---
+# Virtual Service for exported services
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: backend-api-cross-cluster
+  namespace: default
+  labels:
+    aegis.multicluster: service-export
+spec:
+  hosts:
+  - "backend-api.cluster-b.local"
+  http:
+  - match:
+    - sourceLabels:
+        security: cross-cluster
+    route:
+    - destination:
+        host: backend-api.default.svc.cluster.local
+        port:
+          number: 8080
+    timeout: 30s
+    retries:
+      attempts: 3
+      perTryTimeout: 10s
+
+---
+# ConfigMap for cluster identification
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-identity
+  namespace: istio-system
+  labels:
+    aegis.multicluster: identity
+data:
+  cluster-name: "cluster-a"  # Change to "cluster-b" for the other cluster
+  network: "network1"        # Unique network identifier
+  trust-domain: "cluster.local"

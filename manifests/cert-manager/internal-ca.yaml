@@ -1,0 +1,110 @@
+# Internal Certificate Authority for Private Domains
+# This replaces Let's Encrypt for .local FQDNs with an internal CA chain
+
+---
+# Self-signed Root CA Issuer
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: internal-root-ca-issuer
+  namespace: cert-manager
+  labels:
+    aegis.security: internal-ca
+spec:
+  selfSigned: {}
+
+---
+# Root CA Certificate (isCA: true)
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: internal-root-ca
+  namespace: cert-manager
+  labels:
+    aegis.security: internal-ca
+spec:
+  secretName: internal-root-ca-cert
+  issuerRef:
+    name: internal-root-ca-issuer
+    kind: Issuer
+  isCA: true
+  dnsNames:
+  - "aegis.local"
+  - "*.aegis.local"
+  duration: 8760h  # 1 year
+  renewBefore: 720h  # 30 days
+
+---
+# Internal CA Issuer (references root CA)
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: internal-ca-issuer
+  labels:
+    aegis.security: internal-ca
+spec:
+  ca:
+    secretName: internal-root-ca-cert
+
+---
+# Backend API Certificate (using internal CA)
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: backend-api-cert
+  namespace: default
+  labels:
+    aegis.security: internal-ca
+spec:
+  secretName: backend-api-tls
+  issuerRef:
+    name: internal-ca-issuer
+    kind: ClusterIssuer
+  dnsNames:
+  - "backend-api.default.svc.cluster.local"
+  - "backend-api.aegis.local"
+  duration: 2160h  # 90 days
+  renewBefore: 720h  # 30 days
+
+---
+# Istio Gateway Certificate (using internal CA)
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: istio-gateway-cert
+  namespace: istio-system
+  labels:
+    aegis.security: internal-ca
+spec:
+  secretName: istio-gateway-tls
+  issuerRef:
+    name: internal-ca-issuer
+    kind: ClusterIssuer
+  dnsNames:
+  - "*.aegis.local"
+  - "istio-ingressgateway.istio-system.svc.cluster.local"
+  duration: 2160h  # 90 days
+  renewBefore: 720h  # 30 days
+
+---
+# Client Certificate for Mutual TLS (if needed)
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: client-cert
+  namespace: cert-manager
+  labels:
+    aegis.security: internal-ca
+spec:
+  secretName: client-cert
+  issuerRef:
+    name: internal-ca-issuer
+    kind: ClusterIssuer
+  dnsNames:
+  - "client.aegis.local"
+  duration: 2160h  # 90 days
+  renewBefore: 720h  # 30 days
+  usages:
+  - digital signature
+  - key encipherment
+  - client auth

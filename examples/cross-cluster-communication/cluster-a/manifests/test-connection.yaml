@@ -26,7 +26,7 @@ spec:
 
       # Test 1: Health check
       echo "1. Testing backend API health endpoint..."
-      if curl -k -s -o /dev/null -w "%{http_code}" https://backend-api.cluster-b.local/health | grep -q "200"; then
+      if curl -s -o /dev/null -w "%{http_code}" --cacert /etc/ssl/certs/internal-ca.crt https://backend-api.cluster-b.local/health | grep -q "200"; then
         echo "✅ Health check passed"
       else
         echo "❌ Health check failed"
@@ -35,7 +35,7 @@ spec:
 
       # Test 2: API endpoint
       echo "2. Testing backend API data endpoint..."
-      response=$(curl -k -s https://backend-api.cluster-b.local/api/data)
+      response=$(curl -s --cacert /etc/ssl/certs/internal-ca.crt https://backend-api.cluster-b.local/api/data)
       if echo "$response" | grep -q "Hello from backend API"; then
         echo "✅ API endpoint test passed"
         echo "Response: $response"
@@ -47,7 +47,7 @@ spec:
 
       # Test 3: Certificate validation
       echo "3. Testing certificate validation..."
-      if curl -k -v https://backend-api.cluster-b.local/health 2>&1 | grep -q "SSL certificate verify ok"; then
+      if curl -v --cacert /etc/ssl/certs/internal-ca.crt https://backend-api.cluster-b.local/health 2>&1 | grep -q "SSL certificate verify ok"; then
         echo "✅ Certificate validation passed"
       else
         echo "❌ Certificate validation failed"
@@ -55,7 +55,7 @@ spec:
 
       # Test 4: Headers validation
       echo "4. Testing custom headers..."
-      headers=$(curl -k -s -I https://backend-api.cluster-b.local/health)
+      headers=$(curl -s -I --cacert /etc/ssl/certs/internal-ca.crt https://backend-api.cluster-b.local/health)
       if echo "$headers" | grep -q "X-Cluster: cluster-b"; then
         echo "✅ Custom headers test passed"
       else
@@ -101,14 +101,14 @@ spec:
 
           # Test basic connectivity
           echo "Testing basic connectivity..."
-          curl -k --max-time 30 --retry 3 --retry-delay 5 \
+          curl --cacert /etc/ssl/certs/internal-ca.crt --max-time 30 --retry 3 --retry-delay 5 \
             -H "X-Source-Cluster: cluster-a" \
             -H "X-Source-Service: test-job" \
             https://backend-api.cluster-b.local/health
 
           # Test API endpoint
           echo "Testing API endpoint..."
-          response=$(curl -k --max-time 30 --retry 3 --retry-delay 5 \
+          response=$(curl --cacert /etc/ssl/certs/internal-ca.crt --max-time 30 --retry 3 --retry-delay 5 \
             -H "X-Source-Cluster: cluster-a" \
             -H "X-Source-Service: test-job" \
             https://backend-api.cluster-b.local/api/data)
@@ -197,22 +197,4 @@ spec:
     - protocol: UDP
       port: 53     # DNS
 ---
-# Service Monitor for Test Metrics (if Prometheus is available)
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
-metadata:
-  name: cross-cluster-test-monitor
-  namespace: monitoring
-  labels:
-    aegis.example: cross-cluster
-spec:
-  selector:
-    matchLabels:
-      app: cross-cluster-test
-  endpoints:
-  - port: http
-    interval: 30s
-    path: /metrics
-  namespaceSelector:
-    matchNames:
-    - default
+# Note: ServiceMonitor removed - no corresponding Service with metrics port exists

@@ -58,11 +58,14 @@ renew_certificate() {
 
     log "${BLUE}Renewing certificate: $cert_name${NC}"
 
-    # Annotate certificate to trigger renewal
-    kubectl annotate certificate "$cert_name" -n "$NAMESPACE" \
-        cert-manager.io/issuer-kind=Issuer \
-        cert-manager.io/issuer-name=aegis-issuer \
-        --overwrite
+    # Use cert-manager CLI to trigger renewal
+    if command -v cmctl >/dev/null 2>&1; then
+        log "Using cmctl to renew certificate..."
+        cmctl renew "$cert_name" -n "$NAMESPACE"
+    else
+        log "Using kubectl cert-manager to renew certificate..."
+        kubectl cert-manager renew "$cert_name" -n "$NAMESPACE"
+    fi
 
     # Wait for renewal to complete
     log "Waiting for certificate renewal to complete..."

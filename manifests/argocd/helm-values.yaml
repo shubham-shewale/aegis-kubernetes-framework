@@ -1,0 +1,91 @@
+# ArgoCD Helm Chart Values - Hardened Configuration
+# Official ArgoCD Helm chart with security best practices
+
+global:
+  image:
+    tag: "v2.8.4"  # Pinned version instead of latest
+
+# Disable default admin user
+configs:
+  cm:
+    admin.enabled: "false"
+    timeout.reconciliation: 180s
+    timeout.hard: 300s
+  rbac:
+    # Scoped RBAC - restrict to specific namespaces
+    policy.csv: |
+      g, argocd-admins, role:admin
+      g, argocd-developers, role:developer
+      p, role:developer, applications, get, default/*, allow
+      p, role:developer, applications, sync, default/*, allow
+      p, role:developer, applications, update, default/*, allow
+  params:
+    server.insecure: "false"
+
+# Server configuration
+server:
+  replicas: 1
+  image:
+    tag: "v2.8.4"
+  service:
+    type: ClusterIP
+  extraArgs:
+    - --insecure=false
+  ingress:
+    enabled: false  # Use Istio Gateway instead
+  rbacConfig:
+    policy.default: role:readonly
+    policy.csv: |
+      g, argocd-admins, role:admin
+      g, argocd-developers, role:developer
+
+# Repository server
+repoServer:
+  replicas: 1
+  image:
+    tag: "v2.8.4"
+  serviceAccount:
+    create: true
+  env:
+    - name: ARGOCD_GIT_MODULES_ENABLED
+      value: "false"  # Security hardening
+
+# Application controller
+controller:
+  replicas: 1
+  image:
+    tag: "v2.8.4"
+
+# Redis
+redis:
+  image:
+    tag: "7.0.8-alpine"
+
+# Dex for OIDC (optional - can be replaced with external OIDC)
+dex:
+  enabled: false  # Use external OIDC provider
+
+# Security hardening
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 999
+  fsGroup: 999
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+
+# Resource limits
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# Network policies are defined separately
+networkPolicy:
+  create: false  # We define our own
+
+# Service monitor for Prometheus (if available)
+serviceMonitor:
+  enabled: false  # Enable if Prometheus is available

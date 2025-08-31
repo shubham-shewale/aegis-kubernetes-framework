@@ -10,14 +10,16 @@ Welcome to the comprehensive documentation for the **Aegis Kubernetes Framework*
 - [Architecture Overview](ARCHITECTURE.md) - System architecture and design
 
 ### **Security & Compliance**
-- [Security Overview](SECURITY.md) - Comprehensive security implementation
-- [Certificate Management](../examples/irsa-implementation/docs/setup-guide.md) - Certificate lifecycle management
-- [Image Security](../examples/irsa-implementation/docs/setup-guide.md) - Container image security and validation
+- [Security Overview](../SECURITY.md) - Comprehensive security implementation
+- [Certificate Management](../manifests/cert-manager/) - Internal CA and certificate lifecycle
+- [Image Security](../manifests/kyverno/) - Kyverno policies for container security
+- [Network Security](../manifests/network-policies/) - Network policies and segmentation
 
 ### **Infrastructure & Operations**
-- [Terraform Infrastructure](../terraform/README.md) - Infrastructure as Code setup
-- [Kubernetes Configuration](../kops/README.md) - Cluster configuration and management
-- [GitOps with ArgoCD](../manifests/argocd/README.md) - Continuous deployment setup
+- [Terraform Infrastructure](../terraform/) - Infrastructure as Code with VPC, IAM, S3
+- [Kubernetes Configuration](../kops/) - kOps cluster specs with security hardening
+- [GitOps with ArgoCD](../manifests/argocd/) - ArgoCD manifests with OIDC integration
+- [Istio Service Mesh](../manifests/istio/) - Service mesh configuration and policies
 
 ### **Examples & Tutorials**
 - [IRSA Implementation](../examples/irsa-implementation/) - IAM Roles for Service Accounts
@@ -30,23 +32,54 @@ docs/
 ├── README.md              # This file - Documentation index
 ├── DEPLOYMENT.md          # Deployment guide
 ├── ARCHITECTURE.md        # Architecture overview
-└── SECURITY.md           # Security implementation
+├── SECURITY.md           # Security implementation
+├── VERIFICATION.md       # Validation and testing
+└── PROJECT-STRUCTURE.md  # Project organization
 
 examples/
 ├── irsa-implementation/   # IRSA complete implementation
 │   ├── README.md
-│   ├── terraform/
-│   ├── manifests/
-│   ├── scripts/
-│   └── docs/
+│   ├── terraform/        # OIDC provider configuration
+│   ├── manifests/        # Service accounts and RBAC
+│   ├── test-pods/        # IRSA validation tests
+│   └── scripts/          # Automation scripts
 └── cross-cluster-communication/  # Multi-cluster communication
+    ├── cluster-a/        # Frontend application
+    ├── cluster-b/        # Backend API service
+    └── shared/           # Common certificates and Istio config
+
+manifests/
+├── argocd/              # ArgoCD installation and security
+├── istio/               # Service mesh configuration
+├── kyverno/             # Policy engine and security policies
+├── network-policies/    # Network segmentation rules
+├── cert-manager/        # Certificate management
+├── trivy/               # Vulnerability scanning
+├── kops/                # Control plane security
+├── namespaces/          # PSA namespace configurations
+└── tests/               # Validation test manifests
+
+terraform/
+├── main.tf              # Root configuration
+├── modules/             # Reusable infrastructure modules
+│   ├── vpc/            # Network infrastructure
+│   ├── iam/            # Identity and access management
+│   └── s3/             # State storage
+├── variables.tf        # Input variables
+├── outputs.tf          # Output values
+└── backend.tf          # State backend configuration
+
+scripts/
+├── validate-cluster.sh # Comprehensive cluster validation
+├── tls-validation.sh   # Certificate validation
+├── cert-rotation.sh    # Certificate lifecycle management
+└── go/                 # Go-based automation tools
+
+kops/
+└── cluster-spec.yaml   # kOps cluster configuration with security
 
 .github/
-└── workflows/            # CI/CD pipelines
-    ├── terraform.yml     # Infrastructure validation
-    ├── go.yml           # Go code testing
-    ├── sign-images.yml  # Image signing
-    └── security.yml     # Security scanning
+└── workflows/          # CI/CD pipelines
 ```
 
 ## 🚀 **Getting Started**
@@ -72,17 +105,17 @@ examples/
 ## 📋 **Key Topics Covered**
 
 ### **🔒 Security & Compliance**
-- **Zero Trust Architecture**: Service mesh and network policies
-- **Container Security**: Image signing, scanning, and validation
-- **Certificate Management**: Automated certificate lifecycle
-- **CIS Benchmark Compliance**: Kubernetes security standards
-- **Runtime Security**: Falco threat detection and response
+- **Zero Trust Architecture**: STRICT mTLS, network policies, SPIFFE identities
+- **Container Security**: Kyverno image verification, digest pinning, attestations
+- **Certificate Management**: Internal CA, automated rotation, mutual TLS validation
+- **Pod Security Admission**: Restricted by default with documented exceptions
+- **Supply Chain Security**: Cosign signing, Trivy scanning, registry allowlists
 
 ### **🏗️ Infrastructure**
-- **AWS Infrastructure**: VPC, subnets, security groups, IAM
-- **Kubernetes Clusters**: Multi-AZ, HA control plane
-- **GitOps**: ArgoCD for continuous deployment
-- **Monitoring**: Comprehensive observability setup
+- **AWS Infrastructure**: VPC, subnets, NAT gateways, IAM with least privilege
+- **Kubernetes Clusters**: kOps-managed with etcd encryption and Secrets encryption
+- **GitOps**: ArgoCD with OIDC SSO and scoped RBAC
+- **Service Mesh**: Istio with east-west gateways and cross-cluster federation
 
 ### **🔧 Operations**
 - **Automated Deployment**: Terraform and kops automation
@@ -91,10 +124,10 @@ examples/
 - **Disaster Recovery**: Multi-region failover
 
 ### **📊 Examples & Use Cases**
-- **IRSA Implementation**: Complete IAM roles for service accounts
-- **Cross-Cluster Communication**: Service mesh federation
-- **Security Hardening**: Production-ready security configurations
-- **Compliance Automation**: CIS benchmark implementation
+- **IRSA Implementation**: kOps-managed OIDC provider with IAM roles for service accounts
+- **Cross-Cluster Communication**: East-west gateways with STRICT mTLS and SPIFFE identities
+- **Certificate Management**: Internal CA with automated certificate lifecycle
+- **Security Validation**: Automated TLS testing without certificate bypass
 
 ## 🎯 **Documentation Standards**
 
@@ -170,6 +203,6 @@ This documentation provides a **comprehensive guide** to implementing and managi
 
 ---
 
-*Last updated: $(date)*
-*Framework Version: 1.0.0*
-*Documentation Version: 1.0.0*
+*Last updated: 2024-01-01*
+*Framework Version: 2.0.0*
+*Documentation Version: 2.0.0*

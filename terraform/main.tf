@@ -43,8 +43,11 @@ module "vpc" {
 module "iam" {
   source = "./modules/iam"
 
-  environment = var.environment
-  region      = var.region
+  environment      = var.environment
+  region           = var.region
+  cluster_name     = var.cluster_name
+  oidc_thumbprint  = var.oidc_thumbprint
+  kops_state_bucket = module.s3.kops_state_bucket_name
 }
 
 # S3 Module for kops state

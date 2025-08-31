@@ -1,0 +1,123 @@
+# kOps Cluster Specification with OIDC for IRSA
+# This enables serviceAccountIssuerDiscovery and AWS OIDC provider
+
+apiVersion: kops.k8s.io/v1alpha2
+kind: Cluster
+metadata:
+  name: {{CLUSTER_NAME}}
+spec:
+  api:
+    loadBalancer:
+      type: Public
+  authorization:
+    rbac: {}
+  channel: stable
+  cloudProvider: aws
+  configBase: s3://{{KOPS_STATE_BUCKET}}/{{CLUSTER_NAME}}
+  etcdClusters:
+  - cpuRequest: 200m
+    etcdMembers:
+    - encryptedVolume: true  # Enable etcd volume encryption
+      instanceGroup: master-{{AWS_REGION}}a
+      name: a
+    - encryptedVolume: true
+      instanceGroup: master-{{AWS_REGION}}b
+      name: b
+    - encryptedVolume: true
+      instanceGroup: master-{{AWS_REGION}}c
+      name: c
+    memoryRequest: 100Mi
+    name: main
+    version: 3.5.9
+  - cpuRequest: 100m
+    etcdMembers:
+    - encryptedVolume: true
+      instanceGroup: master-{{AWS_REGION}}a
+      name: a
+    - encryptedVolume: true
+      instanceGroup: master-{{AWS_REGION}}b
+      name: b
+    - encryptedVolume: true
+      instanceGroup: master-{{AWS_REGION}}c
+      name: c
+    memoryRequest: 100Mi
+    name: events
+    version: 3.5.9
+  iam:
+    allowContainerRegistry: true
+    legacy: false
+  kubelet:
+    anonymousAuth: false
+  kubernetesApiAccess:
+  - 10.0.0.0/8      # VPC CIDR
+  - 172.16.0.0/12   # Private networks
+  - 192.168.0.0/16  # Private networks
+  kubernetesVersion: 1.28.0
+  masterPublicName: api.{{CLUSTER_NAME}}
+  networkCIDR: 10.0.0.0/16
+  networking:
+    calico: {}
+  nonMasqueradeCIDR: 100.64.0.0/10
+  sshAccess:
+  - 10.0.0.0/8      # VPC CIDR
+  - 172.16.0.0/12   # Private networks
+  - 192.168.0.0/16  # Private networks
+  subnets:
+  - cidr: 10.0.32.0/19
+    name: {{AWS_REGION}}a
+    type: Public
+    zone: {{AWS_REGION}}a
+  - cidr: 10.0.64.0/19
+    name: {{AWS_REGION}}b
+    type: Public
+    zone: {{AWS_REGION}}b
+  - cidr: 10.0.96.0/19
+    name: {{AWS_REGION}}c
+    type: Public
+    zone: {{AWS_REGION}}c
+
+  # Enable serviceAccountIssuerDiscovery for IRSA
+  serviceAccountIssuerDiscovery:
+    discoveryStore: s3://{{KOPS_STATE_BUCKET}}/{{CLUSTER_NAME}}/discovery
+    enableAWSOIDCProvider: true
+
+  # Enable Kubernetes Secrets encryption at rest
+  encryptionConfig: true
+
+---
+apiVersion: kops.k8s.io/v1alpha2
+kind: InstanceGroup
+metadata:
+  labels:
+    kops.k8s.io/cluster: {{CLUSTER_NAME}}
+  name: master-{{AWS_REGION}}a
+spec:
+  image: 099720109477/ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-20230725
+  machineType: t3.medium
+  maxSize: 1
+  minSize: 1
+  nodeLabels:
+    kops.k8s.io/instancegroup: master-{{AWS_REGION}}a
+  role: Master
+  subnets:
+  - {{AWS_REGION}}a
+
+---
+apiVersion: kops.k8s.io/v1alpha2
+kind: InstanceGroup
+metadata:
+  labels:
+    kops.k8s.io/cluster: {{CLUSTER_NAME}}
+  name: nodes-{{AWS_REGION}}a
+spec:
+  image: 099720109477/ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-20230725
+  machineType: t3.medium
+  maxSize: 3
+  minSize: 3
+  nodeLabels:
+    kops.k8s.io/instancegroup: nodes-{{AWS_REGION}}a
+  role: Node
+  subnets:
+  - {{AWS_REGION}}a
+  - {{AWS_REGION}}b
+  - {{AWS_REGION}}c

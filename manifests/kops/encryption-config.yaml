@@ -1,0 +1,15 @@
+# Kubernetes Secrets Encryption Configuration
+# Applied at cluster creation time for defense-in-depth
+
+---
+apiVersion: apiserver.config.k8s.io/v1
+kind: EncryptionConfiguration
+resources:
+  - resources:
+      - secrets
+    providers:
+      - aescbc:
+          keys:
+            - name: key1
+              secret: {{KMS_ENCRYPTION_KEY_SECRET}}
+      - identity: {}  # Fallback to identity provider

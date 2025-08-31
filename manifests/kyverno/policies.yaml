@@ -55,27 +55,76 @@ spec:
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
-  name: validate-image-signatures
+  name: verify-images
   annotations:
-    policies.kyverno.io/title: Validate Image Signatures
+    policies.kyverno.io/title: Verify Image Signatures and Digests
     policies.kyverno.io/category: Security
     policies.kyverno.io/severity: high
     policies.kyverno.io/subject: Pod
 spec:
   validationFailureAction: enforce
+  background: false
   rules:
-  - name: verify-image-signature
+  - name: verify-image-signatures
     match:
       resources:
         kinds:
         - Pod
     verifyImages:
-    - image: "*"
+    - imageReferences:
+      - "ghcr.io/aegis-framework/*"
+      mutateDigest: true
       key: |-
         -----BEGIN PUBLIC KEY-----
         MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE8nXRh950IZbRj8Ra/N9sbqOPQv7
         8XaSm451y8TxLGpN3PoT3kFBA4v8PhCL6pKHyE5H8WTZQMhcWZBm8PjYg==
         -----END PUBLIC KEY-----
+      attestors:
+        count: 1
+        entries:
+        - keyless:
+            subject: "https://github.com/aegis-framework/*"
+            issuer: "https://token.actions.githubusercontent.com"
+  - name: verify-argoproj-images
+    match:
+      resources:
+        kinds:
+        - Pod
+    verifyImages:
+    - imageReferences:
+      - "quay.io/argoproj/*"
+      mutateDigest: true
+      key: |-
+        -----BEGIN PUBLIC KEY-----
+        MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE8nXRh950IZbRj8Ra/N9sbqOPQv7
+        8XaSm451y8TxLGpN3PoT3kFBA4v8PhCL6pKHyE5H8WTZQMhcWZBm8PjYg==
+        -----END PUBLIC KEY-----
+      attestors:
+        count: 1
+        entries:
+        - keyless:
+            subject: "https://github.com/argoproj/*"
+            issuer: "https://token.actions.githubusercontent.com"
+  - name: verify-istio-images
+    match:
+      resources:
+        kinds:
+        - Pod
+    verifyImages:
+    - imageReferences:
+      - "docker.io/istio/*"
+      mutateDigest: true
+      key: |-
+        -----BEGIN PUBLIC KEY-----
+        MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE8nXRh950IZbRj8Ra/N9sbqOPQv7
+        8XaSm451y8TxLGpN3PoT3kFBA4v8PhCL6pKHyE5H8WTZQMhcWZBm8PjYg==
+        -----END PUBLIC KEY-----
+      attestors:
+        count: 1
+        entries:
+        - keyless:
+            subject: "https://github.com/istio/*"
+            issuer: "https://token.actions.githubusercontent.com"
 ---
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
@@ -133,28 +182,102 @@ spec:
             operator: Equals
             value: 0
 ---
+---
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
-  name: validate-certificates
+  name: restrict-image-registries
   annotations:
-    policies.kyverno.io/title: Validate Certificate Expiration
+    policies.kyverno.io/title: Restrict Image Registries
     policies.kyverno.io/category: Security
-    policies.kyverno.io/severity: medium
-    policies.kyverno.io/subject: Certificate
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
 spec:
   validationFailureAction: enforce
+  background: false
   rules:
-  - name: check-cert-expiry
+  - name: allowed-registries
     match:
       resources:
         kinds:
-        - Certificate
+        - Pod
     validate:
-      message: "Certificates must not expire within 30 days."
-      deny:
-        conditions:
-          all:
-          - key: "{{ time_diff(time_now(), request.object.spec.dnsNames) }}"
-            operator: LessThan
-            value: 2592000  # 30 days in seconds
+      message: "Images must be from approved registries only."
+      anyPattern:
+      - spec:
+          containers:
+          - image: "ghcr.io/aegis-framework/*"
+      - spec:
+          containers:
+          - image: "quay.io/argoproj/*"
+      - spec:
+          containers:
+          - image: "docker.io/istio/*"
+      - spec:
+          containers:
+          - image: "gcr.io/kyverno/*"
+      - spec:
+          containers:
+          - image: "k8s.gcr.io/*"
+      - spec:
+          containers:
+          - image: "registry.k8s.io/*"
+
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-privilege-escalation
+  annotations:
+    policies.kyverno.io/title: Disallow Privilege Escalation
+    policies.kyverno.io/category: Pod Security Standards
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+spec:
+  validationFailureAction: enforce
+  rules:
+  - name: block-privilege-escalation
+    match:
+      resources:
+        kinds:
+        - Pod
+    validate:
+      message: "Privilege escalation is not allowed."
+      pattern:
+        spec:
+          containers:
+          - securityContext:
+              allowPrivilegeEscalation: false
+          securityContext:
+            runAsNonRoot: true
+
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-resource-limits
+  annotations:
+    policies.kyverno.io/title: Require Resource Limits
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+spec:
+  validationFailureAction: enforce
+  rules:
+  - name: check-resource-limits
+    match:
+      resources:
+        kinds:
+        - Pod
+    validate:
+      message: "All containers must have resource limits defined."
+      pattern:
+        spec:
+          containers:
+          - resources:
+              limits:
+                memory: "?*"
+                cpu: "?*"
+              requests:
+                memory: "?*"
+                cpu: "?*"

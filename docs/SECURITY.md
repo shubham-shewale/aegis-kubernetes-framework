@@ -27,10 +27,10 @@ The Aegis Kubernetes Framework implements a comprehensive security posture based
 ### Network Security
 
 #### Istio Service Mesh
-- **Mutual TLS (mTLS)**: All service-to-service communication encrypted and authenticated
-- **Authorization Policies**: Fine-grained access control between services
-- **Peer Authentication**: Enforces mTLS at the workload level
-- **Request Authentication**: JWT validation for external requests
+- **Mutual TLS (mTLS)**: STRICT mode enforced globally with SPIFFE identities
+- **Authorization Policies**: SPIFFE-based principals (`spiffe://cluster.local/ns/default/sa/*`)
+- **Peer Authentication**: STRICT mTLS with east-west gateway federation
+- **East-West Gateways**: Cross-cluster service discovery and communication
 
 #### Network Policies
 - **Namespace Isolation**: Traffic between namespaces blocked by default
@@ -40,10 +40,10 @@ The Aegis Kubernetes Framework implements a comprehensive security posture based
 ### Container Security
 
 #### Image Security
-- **Signature Validation**: All images must be signed with Cosign
-- **Vulnerability Scanning**: Trivy scans for CVEs and secrets
-- **Base Image Validation**: Only approved base images allowed
-- **SBOM Generation**: Software Bill of Materials for supply chain security
+- **Digest Pinning**: `mutateDigest: true` converts tags to digests at admission
+- **Signature Validation**: Cosign signatures with keyless attestors
+- **Registry Allowlist**: `anyPattern` with approved registries (ghcr.io, quay.io, etc.)
+- **Attestation Validation**: Required attestors with `count: 1` for supply chain integrity
 
 #### Runtime Security
 - **Pod Security Standards**: Enforced via Kyverno policies
@@ -115,16 +115,16 @@ The Aegis Kubernetes Framework implements a comprehensive security posture based
 - **Data Exfiltration**: Network policies and encryption
 
 ### Certificate Security (Enhanced)
-- **Automated Certificate Rotation**: `cert-rotation.sh` script for proactive renewal
-- **Certificate Expiry Monitoring**: Kyverno policies prevent expired certificates
-- **Certificate Health Validation**: Continuous monitoring and alerting
-- **Certificate Authority Integration**: Support for enterprise CAs
+- **Internal Certificate Authority**: Self-signed CA with cert-manager ClusterIssuer
+- **Automated Certificate Rotation**: `kubectl cert-manager renew` and `cmctl renew` commands
+- **Mutual TLS Validation**: Gateway client certificate validation with `ca.crt`
+- **TLS Testing**: Validation scripts use `--cacert` instead of `-k` bypass
 
 ### Network Policy Security (Enhanced)
-- **Default Deny Policies**: All namespaces require explicit network policies
-- **DNS Access Control**: Controlled DNS resolution for pods
-- **API Server Access**: Restricted communication to Kubernetes API
-- **Service Mesh Integration**: Istio policies complement network policies
+- **Default Deny Policies**: All namespaces blocked by default with explicit allows
+- **Namespace Selectors**: Proper `kubernetes.io/metadata.name` labels for accuracy
+- **DNS Access Control**: Controlled UDP/53 access to kube-system DNS services
+- **API Server Access**: Restricted TCP/6443 and TCP/443 to VPC CIDR ranges
 
 ### etcd Security (Enhanced)
 - **etcd Encryption Validation**: Kyverno policies ensure encryption is enabled
@@ -217,22 +217,23 @@ The Aegis Kubernetes Framework implements a comprehensive security posture based
 ## Recent Security Improvements
 
 ### 🚨 **Critical Security Fixes**
-- **IAM AdministratorAccess Removal**: Replaced dangerous AdministratorAccess policy with custom least-privilege policies
-- **Backend Configuration Fix**: Resolved chicken-egg problem with dedicated backend.tf file
-- **Input Validation**: Added comprehensive Terraform variable validation with regex patterns
-- **Resource Dependencies**: Implemented proper dependency management to prevent race conditions
+- **SPIFFE Authorization Policies**: Updated principals to `spiffe://cluster.local/ns/default/sa/*` format
+- **East-West Gateway Targeting**: Fixed ServiceEntry to use remote cluster gateway addresses
+- **Mutual TLS Client CA**: Added `caCertificates` reference for proper client validation
+- **IRSA OIDC Provider**: Fixed data source usage for kOps-managed OIDC discovery
+- **kube-system PSA Level**: Changed from restricted to privileged with documented exceptions
 
 ### 🔧 **Infrastructure Security Enhancements**
-- **Consistent Tagging**: Standardized resource tagging across all AWS resources
-- **Region-Scoped Policies**: IAM policies limited to specific AWS regions
-- **Resource-Specific Access**: Policies scoped to exact resources needed
-- **Enhanced S3 Security**: Improved bucket naming, encryption, and access controls
+- **Control Plane Access**: Restricted `kubernetesApiAccess` and `sshAccess` to private networks
+- **etcd Encryption**: Enabled `encryptedVolume: true` for all etcd members
+- **Secrets Encryption**: Enabled `encryptionConfig: true` with AES-CBC provider
+- **Network Policy Selectors**: Fixed to use `kubernetes.io/metadata.name` labels
 
 ### ✅ **Validation & Compliance**
-- **Automated Health Checks**: `validate-cluster.sh` for comprehensive cluster validation
-- **Security Compliance Reporting**: `validate-compliance.sh` with JSON output and scoring
-- **Policy Violation Monitoring**: Real-time Kyverno policy enforcement tracking
-- **Multi-layer Assessment**: Network, container, and infrastructure security validation
+- **Certificate Rotation**: Updated scripts to use `kubectl cert-manager renew` and `cmctl renew`
+- **TLS Testing**: Replaced all `curl -k` with `--cacert` for proper certificate validation
+- **Kyverno Policy Fixes**: Removed duplicate attestors blocks and added `background: false`
+- **ServiceMonitor Cleanup**: Removed incomplete monitoring configurations
 
 ## Future Security Enhancements
 

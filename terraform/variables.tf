@@ -79,6 +79,28 @@ variable "state_bucket" {
   }
 }
 
+variable "cluster_name" {
+  description = "Name of the kOps cluster"
+  type        = string
+  default     = "aegis-cluster"
+
+  validation {
+    condition     = can(regex("^[a-z0-9-]+$", var.cluster_name))
+    error_message = "Cluster name must be lowercase alphanumeric with hyphens."
+  }
+}
+
+variable "oidc_thumbprint" {
+  description = "OIDC provider thumbprint from kOps cluster"
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.oidc_thumbprint == "" || can(regex("^[A-Fa-f0-9]{40}$", var.oidc_thumbprint))
+    error_message = "OIDC thumbprint must be a valid SHA1 fingerprint (40 hex characters)."
+  }
+}
+
 variable "tags" {
   description = "Additional tags for all resources"
   type        = map(string)

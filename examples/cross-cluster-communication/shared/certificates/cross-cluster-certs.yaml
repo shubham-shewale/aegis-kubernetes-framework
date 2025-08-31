@@ -76,7 +76,7 @@ spec:
   duration: 2160h  # 90 days
   renewBefore: 720h  # 30 days
 ---
-# Backend API Certificate
+# Backend API Certificate (using internal CA)
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
@@ -87,10 +87,11 @@ metadata:
 spec:
   secretName: backend-api-tls
   issuerRef:
-    name: letsencrypt-prod
+    name: internal-ca-issuer
     kind: ClusterIssuer
   dnsNames:
   - "backend-api.cluster-b.local"
+  - "backend-api.default.svc.cluster.local"
   duration: 2160h  # 90 days
   renewBefore: 720h  # 30 days
 ---

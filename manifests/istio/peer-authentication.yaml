@@ -3,18 +3,23 @@ kind: PeerAuthentication
 metadata:
   name: default
   namespace: istio-system
+  labels:
+    aegis.security: mtls-strict
 spec:
   mtls:
     mode: STRICT
 ---
+# Global STRICT mTLS policy (applied after traffic verification)
 apiVersion: security.istio.io/v1beta1
 kind: PeerAuthentication
 metadata:
-  name: permissive
+  name: global-mtls-strict
   namespace: default
+  labels:
+    aegis.security: mtls-strict
 spec:
   mtls:
-    mode: PERMISSIVE
+    mode: STRICT
 ---
 apiVersion: networking.istio.io/v1alpha3
 kind: Gateway
@@ -30,10 +35,25 @@ spec:
       name: https
       protocol: HTTPS
     tls:
-      mode: SIMPLE
-      credentialName: aegis-tls
+      mode: MUTUAL
+      credentialName: istio-gateway-tls
+      caCertificates: istio-gateway-tls  # Reference CA cert in the same secret
     hosts:
     - "*.aegis.local"
+---
+---
+# Client CA Certificate ConfigMap for Istio Gateway
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: client-ca-cert
+  namespace: istio-system
+  labels:
+    aegis.security: mutual-tls
+data:
+  ca-cert.pem: |
+    # This will be populated by cert-manager from the internal-root-ca-cert secret
+    # The actual certificate content will be mounted into the gateway pods
 ---
 apiVersion: networking.istio.io/v1alpha3
 kind: VirtualService

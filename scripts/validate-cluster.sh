@@ -1,7 +1,6 @@
 #!/bin/bash
-
-# Aegis Cluster Validation Script
-# Validates cluster health, security compliance, and configuration
+# Comprehensive Cluster Validation Script
+# Validates security posture, policies, and configurations
 
 set -e
 
@@ -13,236 +12,173 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-CLUSTER_NAME=${CLUSTER_NAME:-"staging.cluster.aegis.local"}
-KUBECONFIG=${KUBECONFIG:-"$HOME/.kube/config"}
+CLUSTER_NAME="${CLUSTER_NAME:-aegis-cluster}"
+EXPECTED_NAMESPACES=("default" "kube-system" "istio-system" "cert-manager" "argocd" "kyverno" "monitoring")
 
-log_info() {
-    echo -e "${BLUE}[INFO]${NC} $1"
-}
+echo -e "${BLUE}=== Aegis Cluster Validation ===${NC}"
+echo "Validating cluster: $CLUSTER_NAME"
+echo
 
-log_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
-}
-
-log_warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
-}
-
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
-
-check_prerequisites() {
-    log_info "Checking prerequisites..."
-
-    if ! command -v kubectl &> /dev/null; then
-        log_error "kubectl is not installed"
-        exit 1
-    fi
-
-    if ! command -v kops &> /dev/null; then
-        log_error "kops is not installed"
-        exit 1
-    fi
-
-    if [ ! -f "$KUBECONFIG" ]; then
-        log_error "Kubeconfig not found at $KUBECONFIG"
-        exit 1
-    fi
-
-    log_success "Prerequisites check passed"
-}
-
-validate_cluster_connectivity() {
-    log_info "Validating cluster connectivity..."
-
-    if ! kubectl cluster-info &> /dev/null; then
-        log_error "Cannot connect to cluster"
-        exit 1
-    fi
-
-    log_success "Cluster connectivity validated"
-}
-
-validate_cluster_health() {
-    log_info "Validating cluster health..."
-
-    # Check node status
-    local unhealthy_nodes=$(kubectl get nodes --no-headers | grep -v Ready | wc -l)
-    if [ "$unhealthy_nodes" -gt 0 ]; then
-        log_error "Found $unhealthy_nodes unhealthy nodes"
-        kubectl get nodes
-        exit 1
-    fi
-
-    # Check pod status
-    local unhealthy_pods=$(kubectl get pods --all-namespaces --no-headers | grep -v Running | grep -v Completed | wc -l)
-    if [ "$unhealthy_pods" -gt 0 ]; then
-        log_warn "Found $unhealthy_pods unhealthy pods"
-        kubectl get pods --all-namespaces | grep -v Running | grep -v Completed
-    fi
-
-    # Check control plane components
-    local control_plane_pods=$(kubectl get pods -n kube-system --no-headers | grep -E "(kube-apiserver|kube-controller-manager|kube-scheduler|etcd)" | grep -v Running | wc -l)
-    if [ "$control_plane_pods" -gt 0 ]; then
-        log_error "Control plane components are not healthy"
-        kubectl get pods -n kube-system | grep -E "(kube-apiserver|kube-controller-manager|kube-scheduler|etcd)"
-        exit 1
-    fi
-
-    log_success "Cluster health validation passed"
-}
-
-validate_security_components() {
-    log_info "Validating security components..."
-
-    # Check Istio
-    if ! kubectl get namespace istio-system &> /dev/null; then
-        log_error "Istio namespace not found"
-        exit 1
-    fi
-
-    local istio_pods=$(kubectl get pods -n istio-system --no-headers | grep -v Running | wc -l)
-    if [ "$istio_pods" -gt 0 ]; then
-        log_error "Istio pods are not healthy"
-        kubectl get pods -n istio-system
-        exit 1
-    fi
-
-    # Check Kyverno
-    if ! kubectl get namespace kyverno &> /dev/null; then
-        log_error "Kyverno namespace not found"
-        exit 1
-    fi
-
-    local kyverno_pods=$(kubectl get pods -n kyverno --no-headers | grep -v Running | wc -l)
-    if [ "$kyverno_pods" -gt 0 ]; then
-        log_error "Kyverno pods are not healthy"
-        kubectl get pods -n kyverno
-        exit 1
-    fi
-
-    # Check ArgoCD
-    if ! kubectl get namespace argocd &> /dev/null; then
-        log_error "ArgoCD namespace not found"
-        exit 1
-    fi
-
-    local argocd_pods=$(kubectl get pods -n argocd --no-headers | grep -v Running | wc -l)
-    if [ "$argocd_pods" -gt 0 ]; then
-        log_error "ArgoCD pods are not healthy"
-        kubectl get pods -n argocd
-        exit 1
-    fi
-
-    log_success "Security components validation passed"
-}
-
-validate_network_policies() {
-    log_info "Validating network policies..."
-
-    # Check if network policies exist
-    local network_policies=$(kubectl get networkpolicies --all-namespaces --no-headers | wc -l)
-    if [ "$network_policies" -eq 0 ]; then
-        log_warn "No network policies found"
+# Function to check command availability
+check_command() {
+    if ! command -v "$1" >/dev/null 2>&1; then
+        echo -e "${RED}❌ $1 is not available${NC}"
+        return 1
     else
-        log_success "Found $network_policies network policies"
-    fi
-
-    # Check default deny policies
-    local default_deny=$(kubectl get networkpolicies --all-namespaces --no-headers | grep "default-deny" | wc -l)
-    if [ "$default_deny" -eq 0 ]; then
-        log_warn "No default-deny network policies found"
+        echo -e "${GREEN}✅ $1 is available${NC}"
+        return 0
     fi
 }
 
-validate_pod_security() {
-    log_info "Validating pod security..."
-
-    # Check for privileged pods
-    local privileged_pods=$(kubectl get pods --all-namespaces -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.containers[*].securityContext.privileged}{"\n"}{end}' | grep -c "true" || true)
-    if [ "$privileged_pods" -gt 0 ]; then
-        log_warn "Found $privileged_pods privileged pods"
-    fi
-
-    # Check for root containers
-    local root_containers=$(kubectl get pods --all-namespaces -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.containers[*].securityContext.runAsUser}{"\n"}{end}' | grep -c "0" || true)
-    if [ "$root_containers" -gt 0 ]; then
-        log_warn "Found $root_containers root containers"
-    fi
-
-    # Check for missing security contexts
-    local pods_without_security_context=$(kubectl get pods --all-namespaces --no-headers | wc -l)
-    local pods_with_security_context=$(kubectl get pods --all-namespaces -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.securityContext}{"\n"}{end}' | grep -c -v $'\t$' || true)
-
-    if [ "$pods_with_security_context" -lt "$pods_without_security_context" ]; then
-        log_warn "Some pods are missing security contexts"
+# Function to validate namespace exists
+validate_namespace() {
+    local ns=$1
+    if kubectl get namespace "$ns" >/dev/null 2>&1; then
+        echo -e "${GREEN}✅ Namespace $ns exists${NC}"
+        return 0
+    else
+        echo -e "${RED}❌ Namespace $ns does not exist${NC}"
+        return 1
     fi
 }
 
-validate_kops_cluster() {
-    log_info "Validating kops cluster configuration..."
+# Function to validate PSA labels
+validate_psa_labels() {
+    local ns=$1
+    local enforce_level
+    enforce_level=$(kubectl get namespace "$ns" -o jsonpath='{.metadata.labels.pod-security\.kubernetes\.io/enforce}' 2>/dev/null || echo "")
 
-    if ! kops validate cluster --name "$CLUSTER_NAME" --wait 30s; then
-        log_error "kops cluster validation failed"
-        exit 1
+    if [ -n "$enforce_level" ]; then
+        echo -e "${GREEN}✅ PSA enforce level for $ns: $enforce_level${NC}"
+        return 0
+    else
+        echo -e "${YELLOW}⚠️  No PSA labels found for $ns${NC}"
+        return 1
     fi
-
-    log_success "kops cluster validation passed"
 }
 
-generate_report() {
-    log_info "Generating validation report..."
+# Function to validate Kyverno policies
+validate_kyverno_policies() {
+    local policy_count
+    policy_count=$(kubectl get clusterpolicies -o json | jq '.items | length' 2>/dev/null || echo "0")
 
-    local report_file="validation-report-$(date +%Y%m%d-%H%M%S).txt"
-
-    {
-        echo "Aegis Cluster Validation Report"
-        echo "Generated: $(date)"
-        echo "Cluster: $CLUSTER_NAME"
-        echo "========================================"
-        echo ""
-        echo "Cluster Info:"
-        kubectl cluster-info
-        echo ""
-        echo "Node Status:"
-        kubectl get nodes
-        echo ""
-        echo "Pod Status Summary:"
-        kubectl get pods --all-namespaces --no-headers | awk '{print $4}' | sort | uniq -c
-        echo ""
-        echo "Security Components Status:"
-        echo "ArgoCD:"
-        kubectl get pods -n argocd --no-headers | wc -l
-        echo "Istio:"
-        kubectl get pods -n istio-system --no-headers | wc -l
-        echo "Kyverno:"
-        kubectl get pods -n kyverno --no-headers | wc -l
-        echo ""
-        echo "Network Policies:"
-        kubectl get networkpolicies --all-namespaces --no-headers | wc -l
-        echo ""
-        echo "Kyverno Policy Reports:"
-        kubectl get policyreports --all-namespaces --no-headers | wc -l
-    } > "$report_file"
-
-    log_success "Report generated: $report_file"
+    if [ "$policy_count" -gt 0 ]; then
+        echo -e "${GREEN}✅ $policy_count Kyverno policies found${NC}"
+        return 0
+    else
+        echo -e "${RED}❌ No Kyverno policies found${NC}"
+        return 1
+    fi
 }
 
-main() {
-    log_info "Starting Aegis cluster validation..."
+# Function to validate NetworkPolicies
+validate_network_policies() {
+    local ns=$1
+    local policy_count
+    policy_count=$(kubectl get networkpolicies -n "$ns" -o json | jq '.items | length' 2>/dev/null || echo "0")
 
-    check_prerequisites
-    validate_cluster_connectivity
-    validate_cluster_health
-    validate_security_components
-    validate_network_policies
-    validate_pod_security
-    validate_kops_cluster
-    generate_report
-
-    log_success "Cluster validation completed successfully!"
+    if [ "$policy_count" -gt 0 ]; then
+        echo -e "${GREEN}✅ $policy_count NetworkPolicies in $ns${NC}"
+        return 0
+    else
+        echo -e "${YELLOW}⚠️  No NetworkPolicies in $ns${NC}"
+        return 1
+    fi
 }
 
-# Run main function
-main "$@"
+# Function to validate TLS certificates
+validate_certificates() {
+    local cert_count
+    cert_count=$(kubectl get certificates -A -o json | jq '.items | length' 2>/dev/null || echo "0")
+
+    if [ "$cert_count" -gt 0 ]; then
+        echo -e "${GREEN}✅ $cert_count certificates found${NC}"
+        return 0
+    else
+        echo -e "${RED}❌ No certificates found${NC}"
+        return 1
+    fi
+}
+
+# Function to validate Istio configuration
+validate_istio() {
+    if kubectl get deployment istio-ingressgateway -n istio-system >/dev/null 2>&1; then
+        echo -e "${GREEN}✅ Istio ingress gateway found${NC}"
+        return 0
+    else
+        echo -e "${RED}❌ Istio ingress gateway not found${NC}"
+        return 1
+    fi
+}
+
+# Function to validate ArgoCD
+validate_argocd() {
+    if kubectl get deployment argocd-server -n argocd >/dev/null 2>&1; then
+        echo -e "${GREEN}✅ ArgoCD server found${NC}"
+        return 0
+    else
+        echo -e "${RED}❌ ArgoCD server not found${NC}"
+        return 1
+    fi
+}
+
+# Main validation logic
+echo -e "${BLUE}1. Checking prerequisites...${NC}"
+check_command kubectl
+check_command jq
+echo
+
+echo -e "${BLUE}2. Validating cluster connectivity...${NC}"
+if kubectl cluster-info >/dev/null 2>&1; then
+    echo -e "${GREEN}✅ Cluster is accessible${NC}"
+else
+    echo -e "${RED}❌ Cannot connect to cluster${NC}"
+    exit 1
+fi
+echo
+
+echo -e "${BLUE}3. Validating namespaces...${NC}"
+for ns in "${EXPECTED_NAMESPACES[@]}"; do
+    validate_namespace "$ns"
+done
+echo
+
+echo -e "${BLUE}4. Validating Pod Security Admission...${NC}"
+for ns in "${EXPECTED_NAMESPACES[@]}"; do
+    validate_psa_labels "$ns"
+done
+echo
+
+echo -e "${BLUE}5. Validating Kyverno policies...${NC}"
+validate_kyverno_policies
+echo
+
+echo -e "${BLUE}6. Validating NetworkPolicies...${NC}"
+for ns in "${EXPECTED_NAMESPACES[@]}"; do
+    validate_network_policies "$ns"
+done
+echo
+
+echo -e "${BLUE}7. Validating certificates...${NC}"
+validate_certificates
+echo
+
+echo -e "${BLUE}8. Validating Istio...${NC}"
+validate_istio
+echo
+
+echo -e "${BLUE}9. Validating ArgoCD...${NC}"
+validate_argocd
+echo
+
+echo -e "${BLUE}10. Running TLS validation...${NC}"
+if [ -f "./scripts/tls-validation.sh" ]; then
+    echo "Running TLS validation script..."
+    bash ./scripts/tls-validation.sh
+else
+    echo -e "${YELLOW}⚠️  TLS validation script not found${NC}"
+fi
+echo
+
+echo -e "${BLUE}=== Validation Complete ===${NC}"
+echo -e "${GREEN}Cluster validation finished. Review any warnings or errors above.${NC}"

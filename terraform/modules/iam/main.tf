@@ -22,6 +22,16 @@ resource "aws_iam_role" "kops" {
   }
 }
 
+# Note: OIDC Provider is managed by kOps when serviceAccountIssuerDiscovery is enabled
+# with enableAWSOIDCProvider: true. Terraform cannot predict the exact ARN before
+# cluster creation, so this data source should be used after the cluster exists.
+
+# Data source to get the kOps-managed OIDC provider (use after cluster creation)
+# data "aws_iam_openid_connect_provider" "kops_oidc" {
+#   # Uncomment and populate after kOps cluster creation
+#   # arn = "arn:aws:iam::<account-id>:oidc-provider/<oidc-provider-url>"
+# }
+
 # Custom policy for kops with least privilege
 resource "aws_iam_role_policy" "kops" {
   name = "${var.environment}-kops-policy"
