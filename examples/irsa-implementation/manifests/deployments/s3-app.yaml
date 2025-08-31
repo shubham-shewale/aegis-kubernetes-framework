@@ -1,0 +1,171 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: s3-app
+  namespace: default
+  labels:
+    app: s3-app
+    aegis.example: irsa
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: s3-app
+  template:
+    metadata:
+      labels:
+        app: s3-app
+        aegis.example: irsa
+    spec:
+      serviceAccountName: s3-access-sa
+      containers:
+      - name: s3-app
+        image: amazonlinux:2
+        command:
+        - /bin/bash
+        - -c
+        - |
+          # Install AWS CLI
+          yum update -y && yum install -y awscli
+
+          echo "=== IRSA Test Application ==="
+          echo "Testing S3 access using IAM Roles for Service Accounts"
+
+          # Test 1: Get caller identity (should show assumed role)
+          echo "1. Testing AWS STS GetCallerIdentity..."
+          aws sts get-caller-identity
+
+          # Test 2: List S3 buckets (should work if permissions allow)
+          echo "2. Testing S3 bucket listing..."
+          aws s3 ls 2>/dev/null || echo "No S3 buckets accessible (expected for read-only role)"
+
+          # Test 3: Try to access a specific bucket (replace with your bucket)
+          echo "3. Testing specific S3 bucket access..."
+          # Uncomment and modify the following line with your bucket name
+          # aws s3 ls s3://your-bucket-name/ || echo "Bucket access failed"
+
+          echo "4. Application running - check logs for IRSA functionality"
+          echo "Sleeping for monitoring..."
+          while true; do
+            echo "$(date): IRSA application running with role: $(aws sts get-caller-identity --query 'Arn' --output text 2>/dev/null || echo 'unknown')"
+            sleep 300  # Log every 5 minutes
+          done
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        env:
+        - name: AWS_REGION
+          value: "us-east-1"
+        - name: CLUSTER_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: cluster-info
+              key: cluster-name
+        livenessProbe:
+          exec:
+            command:
+            - /bin/bash
+            - -c
+            - aws sts get-caller-identity > /dev/null 2>&1
+          initialDelaySeconds: 30
+          periodSeconds: 60
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - /bin/bash
+            - -c
+            - aws sts get-caller-identity > /dev/null 2>&1
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          timeoutSeconds: 5
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 2000
+      nodeSelector:
+        kubernetes.io/os: linux
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: s3-app
+  namespace: default
+  labels:
+    app: s3-app
+    aegis.example: irsa
+spec:
+  selector:
+    app: s3-app
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+  type: ClusterIP
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-info
+  namespace: default
+  labels:
+    aegis.example: irsa
+data:
+  cluster-name: "aegis-cluster"
+  environment: "dev"
+  region: "us-east-1"
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: s3-app-network-policy
+  namespace: default
+  labels:
+    aegis.example: irsa
+spec:
+  podSelector:
+    matchLabels:
+      app: s3-app
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: istio-system
+    ports:
+    - protocol: TCP
+      port: 8080
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: istio-system
+    ports:
+    - protocol: TCP
+      port: 15012  # Istio pilot
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443    # HTTPS for AWS APIs
+    - protocol: UDP
+      port: 53     # DNS
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: s3-app-pdb
+  namespace: default
+  labels:
+    aegis.example: irsa
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: s3-app

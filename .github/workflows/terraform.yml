@@ -1,0 +1,68 @@
+name: Terraform
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'terraform/**'
+      - '.github/workflows/terraform.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'terraform/**'
+
+jobs:
+  terraform:
+    name: Terraform Validate
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: "1.5.0"
+
+    - name: Terraform Format
+      id: fmt
+      run: terraform fmt -check
+      working-directory: ./terraform
+      continue-on-error: true
+
+    - name: Terraform Validate
+      id: validate
+      run: terraform validate -no-color
+      working-directory: ./terraform
+
+    - name: Terraform Plan
+      id: plan
+      run: |
+        terraform plan -no-color -var="state_bucket=tf-state-${{ github.run_id }}"
+      working-directory: ./terraform
+      continue-on-error: true
+
+    - name: Update Pull Request
+      uses: actions/github-script@v7
+      if: github.event_name == 'pull_request'
+      env:
+        PLAN: "terraform\n${{ steps.fmt.outcome }}\n${{ steps.validate.outcome }}\n${{ steps.plan.outcome }}"
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: |
+          const output = `#### Terraform Format and Validate 🖌\`${{ steps.fmt.outcome }}\`
+          #### Terraform Plan 📖\`${{ steps.plan.outcome }}\`
+
+          *Pushed by: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
+
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: output
+          })
+
+    - name: Terraform Plan Status
+      if: steps.plan.outcome == 'failure'
+      run: exit 1

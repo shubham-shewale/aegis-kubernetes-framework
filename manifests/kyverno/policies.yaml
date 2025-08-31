@@ -1,0 +1,160 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-latest-tag
+  annotations:
+    policies.kyverno.io/title: Disallow Latest Tag
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+spec:
+  validationFailureAction: enforce
+  rules:
+  - name: require-image-tag
+    match:
+      resources:
+        kinds:
+        - Pod
+    validate:
+      message: "An image tag is required."
+      pattern:
+        spec:
+          containers:
+          - image: "*:*"
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-run-as-nonroot
+  annotations:
+    policies.kyverno.io/title: Require Run As Non Root User
+    policies.kyverno.io/category: Pod Security Standards
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+spec:
+  validationFailureAction: enforce
+  rules:
+  - name: run-as-non-root
+    match:
+      resources:
+        kinds:
+        - Pod
+    validate:
+      message: "Running as root is not allowed. Set securityContext.runAsNonRoot to true or securityContext.runAsUser to a non-zero value."
+      pattern:
+        spec:
+          securityContext:
+            runAsNonRoot: true
+          containers:
+          - securityContext:
+              allowPrivilegeEscalation: false
+              privileged: false
+              readOnlyRootFilesystem: true
+              runAsNonRoot: true
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: validate-image-signatures
+  annotations:
+    policies.kyverno.io/title: Validate Image Signatures
+    policies.kyverno.io/category: Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+spec:
+  validationFailureAction: enforce
+  rules:
+  - name: verify-image-signature
+    match:
+      resources:
+        kinds:
+        - Pod
+    verifyImages:
+    - image: "*"
+      key: |-
+        -----BEGIN PUBLIC KEY-----
+        MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE8nXRh950IZbRj8Ra/N9sbqOPQv7
+        8XaSm451y8TxLGpN3PoT3kFBA4v8PhCL6pKHyE5H8WTZQMhcWZBm8PjYg==
+        -----END PUBLIC KEY-----
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: restrict-host-path
+  annotations:
+    policies.kyverno.io/title: Restrict Host Path Volumes
+    policies.kyverno.io/category: Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+spec:
+  validationFailureAction: enforce
+  rules:
+  - name: block-host-path
+    match:
+      resources:
+        kinds:
+        - Pod
+    validate:
+      message: "HostPath volumes are not allowed."
+      deny:
+        conditions:
+          all:
+          - key: "{{ request.object.spec.volumes[].hostPath }}"
+            operator: NotEquals
+            value: ""
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-network-policies
+  annotations:
+    policies.kyverno.io/title: Require Network Policies
+    policies.kyverno.io/category: Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Namespace
+spec:
+  validationFailureAction: enforce
+  rules:
+  - name: require-default-deny
+    match:
+      resources:
+        kinds:
+        - Namespace
+    validate:
+      message: "Namespaces must have a default-deny network policy."
+      deny:
+        conditions:
+          all:
+          - key: "{{ request.object.metadata.name }}"
+            operator: NotIn
+            value: ["kube-system", "kube-public", "kube-node-lease", "default"]
+          - key: |
+              {{ length(request.object.spec) }}
+            operator: Equals
+            value: 0
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: validate-certificates
+  annotations:
+    policies.kyverno.io/title: Validate Certificate Expiration
+    policies.kyverno.io/category: Security
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Certificate
+spec:
+  validationFailureAction: enforce
+  rules:
+  - name: check-cert-expiry
+    match:
+      resources:
+        kinds:
+        - Certificate
+    validate:
+      message: "Certificates must not expire within 30 days."
+      deny:
+        conditions:
+          all:
+          - key: "{{ time_diff(time_now(), request.object.spec.dnsNames) }}"
+            operator: LessThan
+            value: 2592000  # 30 days in seconds

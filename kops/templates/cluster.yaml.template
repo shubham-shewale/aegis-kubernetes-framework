@@ -1,0 +1,159 @@
+apiVersion: kops.k8s.io/v1alpha2
+kind: Cluster
+metadata:
+  name: {{CLUSTER_NAME}}
+spec:
+  api:
+    loadBalancer:
+      type: Public
+  authorization:
+    rbac: {}
+  channel: stable
+  cloudProvider: aws
+  configBase: s3://{{KOPS_STATE_BUCKET}}/kops-{{ENVIRONMENT}}
+  etcdClusters:
+  - cpuRequest: 200m
+    etcdMembers:
+    - encryptedVolume: true
+      instanceGroup: master-{{REGION}}a
+      name: a
+    - encryptedVolume: true
+      instanceGroup: master-{{REGION}}b
+      name: b
+    - encryptedVolume: true
+      instanceGroup: master-{{REGION}}c
+      name: c
+    memoryRequest: 100Mi
+    name: main
+    version: 3.5.9
+  - cpuRequest: 100m
+    etcdMembers:
+    - encryptedVolume: true
+      instanceGroup: master-{{REGION}}a
+      name: a
+    - encryptedVolume: true
+      instanceGroup: master-{{REGION}}b
+      name: b
+    - encryptedVolume: true
+      instanceGroup: master-{{REGION}}c
+      name: c
+    memoryRequest: 100Mi
+    name: events
+    version: 3.5.9
+  iam:
+    allowContainerRegistry: true
+    legacy: false
+  kubelet:
+    anonymousAuth: false
+  kubernetesApiAccess:
+  - 0.0.0.0/0
+  kubernetesVersion: 1.28.0
+  masterPublicName: api.{{CLUSTER_NAME}}
+  networkCIDR: {{VPC_CIDR}}
+  networking:
+    calico: {}
+  nonMasqueradeCIDR: 100.64.0.0/10
+  sshAccess:
+  - 0.0.0.0/0
+  subnets:
+  - cidr: {{PUBLIC_SUBNET_1}}
+    name: {{REGION}}a
+    type: Public
+    zone: {{REGION}}a
+  - cidr: {{PUBLIC_SUBNET_2}}
+    name: {{REGION}}b
+    type: Public
+    zone: {{REGION}}b
+  - cidr: {{PUBLIC_SUBNET_3}}
+    name: {{REGION}}c
+    type: Public
+    zone: {{REGION}}c
+  - cidr: {{PRIVATE_SUBNET_1}}
+    name: {{REGION}}a-private
+    type: Private
+    zone: {{REGION}}a
+  - cidr: {{PRIVATE_SUBNET_2}}
+    name: {{REGION}}b-private
+    type: Private
+    zone: {{REGION}}b
+  - cidr: {{PRIVATE_SUBNET_3}}
+    name: {{REGION}}c-private
+    type: Private
+    zone: {{REGION}}c
+  topology:
+    masters: public
+    nodes: private
+
+---
+apiVersion: kops.k8s.io/v1alpha2
+kind: InstanceGroup
+metadata:
+  labels:
+    kops.k8s.io/cluster: {{CLUSTER_NAME}}
+  name: master-{{REGION}}a
+spec:
+  image: 099720109477/ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-20230517
+  machineType: t3.medium
+  maxSize: 1
+  minSize: 1
+  nodeLabels:
+    kops.k8s.io/instancegroup: master-{{REGION}}a
+  role: Master
+  subnets:
+  - {{REGION}}a
+
+---
+apiVersion: kops.k8s.io/v1alpha2
+kind: InstanceGroup
+metadata:
+  labels:
+    kops.k8s.io/cluster: {{CLUSTER_NAME}}
+  name: master-{{REGION}}b
+spec:
+  image: 099720109477/ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-20230517
+  machineType: t3.medium
+  maxSize: 1
+  minSize: 1
+  nodeLabels:
+    kops.k8s.io/instancegroup: master-{{REGION}}b
+  role: Master
+  subnets:
+  - {{REGION}}b
+
+---
+apiVersion: kops.k8s.io/v1alpha2
+kind: InstanceGroup
+metadata:
+  labels:
+    kops.k8s.io/cluster: {{CLUSTER_NAME}}
+  name: master-{{REGION}}c
+spec:
+  image: 099720109477/ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-20230517
+  machineType: t3.medium
+  maxSize: 1
+  minSize: 1
+  nodeLabels:
+    kops.k8s.io/instancegroup: master-{{REGION}}c
+  role: Master
+  subnets:
+  - {{REGION}}c
+
+---
+apiVersion: kops.k8s.io/v1alpha2
+kind: InstanceGroup
+metadata:
+  labels:
+    kops.k8s.io/cluster: {{CLUSTER_NAME}}
+  name: nodes
+spec:
+  image: 099720109477/ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-20230517
+  machineType: t3.large
+  maxSize: 10
+  minSize: 3
+  nodeLabels:
+    kops.k8s.io/instancegroup: nodes
+  role: Node
+  subnets:
+  - {{REGION}}a-private
+  - {{REGION}}b-private
+  - {{REGION}}c-private

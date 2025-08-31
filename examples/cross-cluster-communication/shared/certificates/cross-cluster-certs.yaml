@@ -1,0 +1,243 @@
+# Cross-Cluster Certificate Management
+# This configuration manages certificates for secure cross-cluster communication
+
+---
+# Cross-Cluster Certificate Authority
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: cross-cluster-issuer
+  namespace: cert-manager
+  labels:
+    aegis.example: cross-cluster
+spec:
+  selfSigned: {}
+---
+# Root CA Certificate for Cross-Cluster Communication
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: cross-cluster-ca
+  namespace: cert-manager
+  labels:
+    aegis.example: cross-cluster
+spec:
+  secretName: cross-cluster-ca-cert
+  issuerRef:
+    name: cross-cluster-issuer
+    kind: Issuer
+  dnsNames:
+  - "*.cluster-a.local"
+  - "*.cluster-b.local"
+  - "*.aegis.local"
+  - "cluster-a-gateway.aegis.local"
+  - "cluster-b-gateway.aegis.local"
+  - "backend-api.cluster-b.local"
+  - "frontend-app.cluster-a.local"
+  duration: 8760h  # 1 year
+  renewBefore: 720h  # 30 days
+---
+# Cluster A Gateway Certificate
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: cluster-a-gateway-cert
+  namespace: istio-system
+  labels:
+    aegis.example: cross-cluster
+spec:
+  secretName: cluster-a-gateway-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+  - "cluster-a-gateway.aegis.local"
+  - "*.cluster-a.local"
+  duration: 2160h  # 90 days
+  renewBefore: 720h  # 30 days
+---
+# Cluster B Gateway Certificate
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: cluster-b-gateway-cert
+  namespace: istio-system
+  labels:
+    aegis.example: cross-cluster
+spec:
+  secretName: cluster-b-gateway-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+  - "cluster-b-gateway.aegis.local"
+  - "*.cluster-b.local"
+  - "backend-api.cluster-b.local"
+  duration: 2160h  # 90 days
+  renewBefore: 720h  # 30 days
+---
+# Backend API Certificate
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: backend-api-cert
+  namespace: default
+  labels:
+    aegis.example: cross-cluster
+spec:
+  secretName: backend-api-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+  - "backend-api.cluster-b.local"
+  duration: 2160h  # 90 days
+  renewBefore: 720h  # 30 days
+---
+# Let's Encrypt ClusterIssuer (Production)
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+  labels:
+    aegis.example: cross-cluster
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: admin@aegis.local
+    privateKeySecretRef:
+      name: letsencrypt-prod
+    solvers:
+    - http01:
+        ingress:
+          class: istio
+---
+# Let's Encrypt ClusterIssuer (Staging)
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+  labels:
+    aegis.example: cross-cluster
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: admin@aegis.local
+    privateKeySecretRef:
+      name: letsencrypt-staging
+    solvers:
+    - http01:
+        ingress:
+          class: istio
+---
+# Certificate Request for Manual Certificate (if needed)
+apiVersion: cert-manager.io/v1
+kind: CertificateRequest
+metadata:
+  name: cross-cluster-manual-cert
+  namespace: cert-manager
+  labels:
+    aegis.example: cross-cluster
+spec:
+  issuerRef:
+    name: cross-cluster-issuer
+    kind: Issuer
+  dnsNames:
+  - "*.aegis.local"
+  - "*.cluster-a.local"
+  - "*.cluster-b.local"
+  duration: 8760h
+  usages:
+  - digital signature
+  - key encipherment
+  - server auth
+  - client auth
+---
+# Certificate Revocation Check (if using custom CA)
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: cross-cluster-client-cert
+  namespace: cert-manager
+  labels:
+    aegis.example: cross-cluster
+spec:
+  secretName: cross-cluster-client-cert
+  issuerRef:
+    name: cross-cluster-issuer
+    kind: Issuer
+  dnsNames:
+  - "client.cluster-a.local"
+  - "client.cluster-b.local"
+  duration: 2160h
+  renewBefore: 720h
+  usages:
+  - digital signature
+  - key encipherment
+  - client auth
+---
+# Certificate Monitoring
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: certificate-monitoring
+  namespace: monitoring
+  labels:
+    aegis.example: cross-cluster
+spec:
+  groups:
+  - name: certificate-alerts
+    rules:
+    - alert: CertificateExpiryWarning
+      expr: certmanager_certificate_expires_in_seconds < 604800
+      for: 1h
+      labels:
+        severity: warning
+      annotations:
+        summary: "Certificate expires in less than 7 days"
+        description: "Certificate {{ $labels.name }} expires in {{ $value | humanizeDuration }}"
+    - alert: CertificateExpiryCritical
+      expr: certmanager_certificate_expires_in_seconds < 86400
+      for: 30m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Certificate expires in less than 24 hours"
+        description: "Certificate {{ $labels.name }} expires in {{ $value | humanizeDuration }}"
+---
+# Certificate Health Check Job
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: certificate-health-check
+  namespace: cert-manager
+  labels:
+    aegis.example: cross-cluster
+spec:
+  schedule: "0 */4 * * *"  # Every 4 hours
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: cert-manager
+          containers:
+          - name: cert-check
+            image: curlimages/curl:latest
+            command:
+            - /bin/sh
+            - -c
+            - |
+              # Check certificate expiry
+              echo "Checking certificate expiry..."
+              kubectl get certificates -A -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.notAfter}{"\n"}{end}' | \
+              while read cert expiry; do
+                if [ -n "$expiry" ]; then
+                  expiry_epoch=$(date -d "$expiry" +%s 2>/dev/null || echo "0")
+                  current_epoch=$(date +%s)
+                  days_left=$(( (expiry_epoch - current_epoch) / 86400 ))
+                  if [ "$days_left" -lt 30 ]; then
+                    echo "WARNING: Certificate $cert expires in $days_left days"
+                  fi
+                fi
+              done
+          restartPolicy: OnFailure

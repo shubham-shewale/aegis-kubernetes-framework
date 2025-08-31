@@ -1,0 +1,258 @@
+# Cross-Cluster Service Federation Configuration
+# This file configures Istio service mesh federation between cluster-a and cluster-b
+
+---
+# Cluster A: Service Entry for accessing Cluster B services
+apiVersion: networking.istio.io/v1alpha3
+kind: ServiceEntry
+metadata:
+  name: cluster-b-services
+  namespace: istio-system
+  labels:
+    aegis.example: cross-cluster
+spec:
+  hosts:
+  - "*.cluster-b.local"
+  - "backend-api.cluster-b.local"
+  ports:
+  - number: 443
+    name: https
+    protocol: HTTPS
+  - number: 80
+    name: http
+    protocol: HTTP
+  resolution: DNS
+  endpoints:
+  - address: cluster-b-gateway.aegis.local  # Replace with actual gateway IP/DNS
+    ports:
+      https: 443
+      http: 80
+  location: MESH_EXTERNAL
+  exportTo:
+  - "*"  # Export to all namespaces
+---
+# Cluster A: Virtual Service for routing to Cluster B
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: cross-cluster-backend-api
+  namespace: default
+  labels:
+    aegis.example: cross-cluster
+spec:
+  hosts:
+  - "backend-api.cluster-b.local"
+  http:
+  - match:
+    - uri:
+        prefix: "/api"
+    - headers:
+        x-source-cluster:
+          exact: "cluster-a"
+    route:
+    - destination:
+        host: "backend-api.cluster-b.local"
+        port:
+          number: 443
+    timeout: 30s
+    retries:
+      attempts: 3
+      perTryTimeout: 10s
+      retryOn: "5xx,connect-failure,refused-stream"
+  - match:
+    - uri:
+        prefix: "/health"
+    route:
+    - destination:
+        host: "backend-api.cluster-b.local"
+        port:
+          number: 443
+---
+# Cluster A: Destination Rule for traffic policies to Cluster B
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: cross-cluster-backend-policies
+  namespace: default
+  labels:
+    aegis.example: cross-cluster
+spec:
+  host: "*.cluster-b.local"
+  trafficPolicy:
+    tls:
+      mode: MUTUAL
+      sni: "*.cluster-b.local"
+    loadBalancer:
+      simple: ROUND_ROBIN
+    connectionPool:
+      tcp:
+        maxConnections: 100
+        connectTimeout: 30s
+      http:
+        http1MaxPendingRequests: 10
+        http2MaxRequests: 100
+        maxRequestsPerConnection: 10
+        maxRetries: 3
+    outlierDetection:
+      consecutive5xxErrors: 3
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+---
+# Cluster A: Peer Authentication for mTLS to Cluster B
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: cross-cluster-mtls
+  namespace: istio-system
+  labels:
+    aegis.example: cross-cluster
+spec:
+  selector:
+    matchLabels:
+      security: cross-cluster
+  mtls:
+    mode: STRICT
+---
+# Cluster A: Authorization Policy for accessing Cluster B services
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: cross-cluster-access
+  namespace: default
+  labels:
+    aegis.example: cross-cluster
+spec:
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        principals: ["cluster-a.local/ns/default/sa/frontend-sa"]
+        namespaces: ["default"]
+    to:
+    - operation:
+        hosts: ["backend-api.cluster-b.local"]
+        methods: ["GET", "POST"]
+        paths: ["/api/*", "/health"]
+  - from:
+    - source:
+        principals: ["cluster-a.local/ns/istio-system/sa/istio-ingressgateway-service-account"]
+    to:
+    - operation:
+        hosts: ["backend-api.cluster-b.local"]
+        methods: ["GET"]
+        paths: ["/health"]
+---
+# Cluster B: Service Entry for accessing Cluster A services (if needed)
+apiVersion: networking.istio.io/v1alpha3
+kind: ServiceEntry
+metadata:
+  name: cluster-a-services
+  namespace: istio-system
+  labels:
+    aegis.example: cross-cluster
+spec:
+  hosts:
+  - "*.cluster-a.local"
+  - "frontend-app.cluster-a.local"
+  ports:
+  - number: 443
+    name: https
+    protocol: HTTPS
+  - number: 80
+    name: http
+    protocol: HTTP
+  resolution: DNS
+  endpoints:
+  - address: cluster-a-gateway.aegis.local  # Replace with actual gateway IP/DNS
+    ports:
+      https: 443
+      http: 80
+  location: MESH_EXTERNAL
+  exportTo:
+  - "*"  # Export to all namespaces
+---
+# Cluster B: Authorization Policy for receiving requests from Cluster A
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-cluster-a-access
+  namespace: default
+  labels:
+    aegis.example: cross-cluster
+spec:
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        principals: ["cluster-a.local/*"]
+    to:
+    - operation:
+        hosts: ["backend-api.cluster-b.local"]
+        methods: ["GET", "POST"]
+        paths: ["/api/*", "/health"]
+---
+# Telemetry configuration for cross-cluster monitoring
+apiVersion: telemetry.istio.io/v1alpha1
+kind: Telemetry
+metadata:
+  name: cross-cluster-telemetry
+  namespace: istio-system
+  labels:
+    aegis.example: cross-cluster
+spec:
+  selector:
+    matchLabels:
+      security: cross-cluster
+  metrics:
+  - providers:
+    - name: prometheus
+    overrides:
+    - match:
+        metric: REQUEST_COUNT
+      mode: CLIENT_AND_SERVER
+      tagOverrides:
+        source_cluster:
+          value: "request.headers['x-source-cluster']"
+        source_service:
+          value: "request.headers['x-source-service']"
+  accessLogging:
+  - providers:
+    - name: envoy
+    filter:
+      expression: "request.headers['x-source-cluster'] == 'cluster-a'"
+---
+# Rate limiting for cross-cluster traffic
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: cross-cluster-rate-limit
+  namespace: istio-system
+  labels:
+    aegis.example: cross-cluster
+spec:
+  workloadSelector:
+    labels:
+      istio: ingressgateway
+  configPatches:
+  - applyTo: HTTP_FILTER
+    match:
+      context: GATEWAY
+      listener:
+        filterChain:
+          filter:
+            name: envoy.filters.network.http_connection_manager
+            subFilter:
+              name: envoy.filters.http.router
+    patch:
+      operation: INSERT_BEFORE
+      value:
+        name: envoy.filters.http.ratelimit
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.http.ratelimit.v3.RateLimit
+          domain: cross-cluster
+          rate_limit_service:
+            grpc_service:
+              envoy_grpc:
+                cluster_name: rate_limit_service
+            transport_api_version: V3

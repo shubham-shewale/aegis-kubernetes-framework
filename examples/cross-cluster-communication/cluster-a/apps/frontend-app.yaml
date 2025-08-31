@@ -1,0 +1,172 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-app
+  namespace: default
+  labels:
+    app: frontend-app
+    security: cross-cluster
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: frontend-app
+  template:
+    metadata:
+      labels:
+        app: frontend-app
+        security: cross-cluster
+        version: v1
+    spec:
+      serviceAccountName: frontend-sa
+      containers:
+      - name: frontend
+        image: nginx:1.21-alpine
+        ports:
+        - containerPort: 80
+        env:
+        - name: BACKEND_URL
+          value: "https://backend-api.cluster-b.local"
+        - name: CLUSTER_NAME
+          value: "cluster-a"
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        volumeMounts:
+        - name: nginx-config
+          mountPath: /etc/nginx/conf.d
+      volumes:
+      - name: nginx-config
+        configMap:
+          name: frontend-nginx-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-app
+  namespace: default
+  labels:
+    app: frontend-app
+spec:
+  selector:
+    app: frontend-app
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+  type: ClusterIP
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frontend-nginx-config
+  namespace: default
+data:
+  default.conf: |
+    server {
+        listen 80;
+        server_name localhost;
+
+        location / {
+            root /usr/share/nginx/html;
+            index index.html;
+
+            # Add custom header to identify cluster
+            add_header X-Cluster "cluster-a" always;
+            add_header X-Version "v1" always;
+        }
+
+        location /api {
+            # Proxy to backend API in cluster-b
+            proxy_pass https://backend-api.cluster-b.local;
+            proxy_ssl_verify on;
+            proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
+
+            # Add headers for cross-cluster communication
+            proxy_set_header X-Forwarded-Host $host;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Source-Cluster "cluster-a";
+            proxy_set_header X-Source-Service "frontend-app";
+
+            # Timeout settings for cross-cluster calls
+            proxy_connect_timeout 30s;
+            proxy_send_timeout 30s;
+            proxy_read_timeout 30s;
+        }
+
+        location /health {
+            access_log off;
+            return 200 "healthy\n";
+            add_header Content-Type text/plain;
+        }
+    }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: frontend-sa
+  namespace: default
+  labels:
+    app: frontend-app
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend-network-policy
+  namespace: default
+spec:
+  podSelector:
+    matchLabels:
+      app: frontend-app
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: istio-system
+    ports:
+    - protocol: TCP
+      port: 80
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: istio-system
+    ports:
+    - protocol: TCP
+      port: 15012  # Istio pilot
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443  # HTTPS for cross-cluster communication
+    - protocol: UDP
+      port: 53   # DNS
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: frontend-pdb
+  namespace: default
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: frontend-app

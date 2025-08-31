@@ -1,0 +1,53 @@
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: istio-system
+spec:
+  mtls:
+    mode: STRICT
+---
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: permissive
+  namespace: default
+spec:
+  mtls:
+    mode: PERMISSIVE
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: aegis-gateway
+  namespace: istio-system
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+  - port:
+      number: 443
+      name: https
+      protocol: HTTPS
+    tls:
+      mode: SIMPLE
+      credentialName: aegis-tls
+    hosts:
+    - "*.aegis.local"
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: argocd-vs
+  namespace: argocd
+spec:
+  hosts:
+  - argocd.aegis.local
+  gateways:
+  - istio-system/aegis-gateway
+  http:
+  - route:
+    - destination:
+        host: argocd-server.argocd.svc.cluster.local
+        port:
+          number: 80

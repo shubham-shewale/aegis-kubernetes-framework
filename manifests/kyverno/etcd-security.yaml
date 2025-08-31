@@ -1,0 +1,86 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: etcd-pod-security
+  annotations:
+    policies.kyverno.io/title: etcd Pod Security
+    policies.kyverno.io/category: Security
+    policies.kyverno.io/severity: critical
+    policies.kyverno.io/subject: Pod
+spec:
+  validationFailureAction: enforce
+  rules:
+  - name: etcd-encryption-enabled
+    match:
+      resources:
+        kinds:
+        - Pod
+        namespaces:
+        - kube-system
+    validate:
+      message: "etcd pods must have encryption enabled."
+      pattern:
+        metadata:
+          labels:
+            component: etcd
+        spec:
+          containers:
+          - name: etcd
+            env:
+            - name: ETCD_ENCRYPTION_PROVIDER_CONFIG
+              value: "/etc/kubernetes/pki/etcd-encryption-config.yaml"
+  - name: etcd-network-isolation
+    match:
+      resources:
+        kinds:
+        - Pod
+        namespaces:
+        - kube-system
+    validate:
+      message: "etcd pods must be properly isolated."
+      pattern:
+        metadata:
+          labels:
+            component: etcd
+        spec:
+          securityContext:
+            runAsUser: 2322  # etcd user
+            runAsGroup: 2322
+            runAsNonRoot: true
+          containers:
+          - securityContext:
+              allowPrivilegeEscalation: false
+              privileged: false
+              readOnlyRootFilesystem: true
+              runAsNonRoot: true
+              runAsUser: 2322
+              runAsGroup: 2322
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: restrict-etcd-access
+  annotations:
+    policies.kyverno.io/title: Restrict etcd Access
+    policies.kyverno.io/category: Security
+    policies.kyverno.io/severity: critical
+    policies.kyverno.io/subject: Pod
+spec:
+  validationFailureAction: enforce
+  rules:
+  - name: block-etcd-direct-access
+    match:
+      resources:
+        kinds:
+        - Pod
+    validate:
+      message: "Direct access to etcd is not allowed."
+      deny:
+        conditions:
+          all:
+          - key: "{{ request.object.spec.containers[].env[].name }}"
+            operator: Equals
+            value: "ETCDCTL_API"
+          - key: "{{ request.object.metadata.namespace }}"
+            operator: NotEquals
+            value: "kube-system"

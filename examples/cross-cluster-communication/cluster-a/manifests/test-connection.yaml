@@ -1,0 +1,218 @@
+# Cross-Cluster Connection Test
+# This manifest creates test pods to validate cross-cluster communication
+
+---
+# Test Pod for Cross-Cluster Connectivity
+apiVersion: v1
+kind: Pod
+metadata:
+  name: cross-cluster-test
+  namespace: default
+  labels:
+    app: cross-cluster-test
+    aegis.example: cross-cluster
+spec:
+  serviceAccountName: frontend-sa
+  restartPolicy: Never
+  containers:
+  - name: test-connection
+    image: curlimages/curl:latest
+    command:
+    - /bin/sh
+    - -c
+    - |
+      echo "=== Cross-Cluster Communication Test ==="
+      echo "Testing connection from cluster-a to cluster-b..."
+
+      # Test 1: Health check
+      echo "1. Testing backend API health endpoint..."
+      if curl -k -s -o /dev/null -w "%{http_code}" https://backend-api.cluster-b.local/health | grep -q "200"; then
+        echo "✅ Health check passed"
+      else
+        echo "❌ Health check failed"
+        exit 1
+      fi
+
+      # Test 2: API endpoint
+      echo "2. Testing backend API data endpoint..."
+      response=$(curl -k -s https://backend-api.cluster-b.local/api/data)
+      if echo "$response" | grep -q "Hello from backend API"; then
+        echo "✅ API endpoint test passed"
+        echo "Response: $response"
+      else
+        echo "❌ API endpoint test failed"
+        echo "Response: $response"
+        exit 1
+      fi
+
+      # Test 3: Certificate validation
+      echo "3. Testing certificate validation..."
+      if curl -k -v https://backend-api.cluster-b.local/health 2>&1 | grep -q "SSL certificate verify ok"; then
+        echo "✅ Certificate validation passed"
+      else
+        echo "❌ Certificate validation failed"
+      fi
+
+      # Test 4: Headers validation
+      echo "4. Testing custom headers..."
+      headers=$(curl -k -s -I https://backend-api.cluster-b.local/health)
+      if echo "$headers" | grep -q "X-Cluster: cluster-b"; then
+        echo "✅ Custom headers test passed"
+      else
+        echo "❌ Custom headers test failed"
+        echo "Headers: $headers"
+      fi
+
+      echo "=== All tests completed ==="
+      echo "Cross-cluster communication is working correctly! 🎉"
+    resources:
+      requests:
+        memory: "32Mi"
+        cpu: "50m"
+      limits:
+        memory: "64Mi"
+        cpu: "100m"
+---
+# Test Job for Automated Cross-Cluster Testing
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cross-cluster-connectivity-test
+  namespace: default
+  labels:
+    app: cross-cluster-test
+    aegis.example: cross-cluster
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      serviceAccountName: frontend-sa
+      restartPolicy: Never
+      containers:
+      - name: connectivity-test
+        image: curlimages/curl:latest
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+
+          echo "Starting automated cross-cluster connectivity test..."
+
+          # Test basic connectivity
+          echo "Testing basic connectivity..."
+          curl -k --max-time 30 --retry 3 --retry-delay 5 \
+            -H "X-Source-Cluster: cluster-a" \
+            -H "X-Source-Service: test-job" \
+            https://backend-api.cluster-b.local/health
+
+          # Test API endpoint
+          echo "Testing API endpoint..."
+          response=$(curl -k --max-time 30 --retry 3 --retry-delay 5 \
+            -H "X-Source-Cluster: cluster-a" \
+            -H "X-Source-Service: test-job" \
+            https://backend-api.cluster-b.local/api/data)
+
+          # Validate response contains expected data
+          if ! echo "$response" | grep -q "cluster-b"; then
+            echo "ERROR: Response does not contain expected cluster identifier"
+            echo "Response: $response"
+            exit 1
+          fi
+
+          echo "Cross-cluster connectivity test passed! ✅"
+        resources:
+          requests:
+            memory: "32Mi"
+            cpu: "50m"
+          limits:
+            memory: "64Mi"
+            cpu: "100m"
+---
+# ConfigMap for Test Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cross-cluster-test-config
+  namespace: default
+  labels:
+    aegis.example: cross-cluster
+data:
+  test-endpoints: |
+    - name: backend-api-health
+      url: https://backend-api.cluster-b.local/health
+      expected_status: 200
+      timeout: 30
+
+    - name: backend-api-data
+      url: https://backend-api.cluster-b.local/api/data
+      expected_status: 200
+      timeout: 30
+
+  test-headers: |
+    X-Source-Cluster: cluster-a
+    X-Source-Service: automated-test
+    X-Test-ID: connectivity-validation
+
+  expected-response-patterns: |
+    - "Hello from backend API in cluster-b"
+    - "cluster-b"
+    - "healthy"
+---
+# Network Policy for Test Pods
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cross-cluster-test-network-policy
+  namespace: default
+  labels:
+    aegis.example: cross-cluster
+spec:
+  podSelector:
+    matchLabels:
+      app: cross-cluster-test
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: TCP
+      port: 80
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: istio-system
+    ports:
+    - protocol: TCP
+      port: 15012  # Istio pilot
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443    # HTTPS for cross-cluster
+    - protocol: UDP
+      port: 53     # DNS
+---
+# Service Monitor for Test Metrics (if Prometheus is available)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: cross-cluster-test-monitor
+  namespace: monitoring
+  labels:
+    aegis.example: cross-cluster
+spec:
+  selector:
+    matchLabels:
+      app: cross-cluster-test
+  endpoints:
+  - port: http
+    interval: 30s
+    path: /metrics
+  namespaceSelector:
+    matchNames:
+    - default
